@@ -22,8 +22,8 @@ export function AuthProvider({ children }) {
     refresh();
   }, []);
 
-  async function loginWithIdToken(idToken) {
-    const { data } = await api.post('/auth/google/client', { idToken });
+  async function login(username, password) {
+    const { data } = await api.post('/auth/login', { username, password });
     setUser(data.user);
     return data.user;
   }
@@ -34,7 +34,7 @@ export function AuthProvider({ children }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, refresh, loginWithIdToken, logout, setUser }}>
+    <AuthContext.Provider value={{ user, loading, refresh, login, logout, setUser }}>
       {children}
     </AuthContext.Provider>
   );

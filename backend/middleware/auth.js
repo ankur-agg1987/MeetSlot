@@ -1,8 +1,8 @@
 const jwt = require('jsonwebtoken');
-const User = require('../models/User');
+const AdminUser = require('../models/AdminUser');
 
-// Verifies the JWT issued at login (sent as httpOnly cookie "token" OR Bearer header)
-// and attaches the full user document to req.user.
+// Verifies the JWT issued at login (sent as an httpOnly cookie "token") and
+// attaches the full admin/advisor document to req.user.
 async function requireAuth(req, res, next) {
   try {
     const token =
@@ -14,8 +14,8 @@ async function requireAuth(req, res, next) {
     if (!token) return res.status(401).json({ message: 'Not authenticated' });
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await User.findById(decoded.id);
-    if (!user) return res.status(401).json({ message: 'User not found' });
+    const user = await AdminUser.findById(decoded.id);
+    if (!user || !user.isActive) return res.status(401).json({ message: 'Account not found or disabled' });
 
     req.user = user;
     next();
@@ -24,12 +24,16 @@ async function requireAuth(req, res, next) {
   }
 }
 
-// Extra gate for routes only an organizer (calendar-connected user) can use.
-function requireOrganizer(req, res, next) {
-  if (!req.user?.isOrganizer) {
-    return res.status(403).json({ message: 'You need to connect your Google Calendar as an organizer first' });
-  }
-  next();
+function requireRole(role) {
+  return (req, res, next) => {
+    if (req.user?.role !== role) {
+      return res.status(403).json({ message: 'You do not have permission to do that' });
+    }
+    next();
+  };
 }
 
-module.exports = { requireAuth, requireOrganizer };
+const requireMasterAdmin = requireRole('master_admin');
+const requireAdvisor = requireRole('advisor');
+
+module.exports = { requireAuth, requireMasterAdmin, requireAdvisor };

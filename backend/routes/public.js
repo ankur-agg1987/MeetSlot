@@ -1,66 +1,70 @@
 const express = require('express');
 const { DateTime } = require('luxon');
-const User = require('../models/User');
+const AdminUser = require('../models/AdminUser');
 const EventType = require('../models/EventType');
 const Availability = require('../models/Availability');
 const Booking = require('../models/Booking');
-const { getBusyBlocks } = require('../utils/googleCalendar');
 const { computeSlotsForDate } = require('../utils/slots');
 
 const router = express.Router();
 
-// GET /api/public/:username -> organizer's public profile + active event types
-router.get('/:username', async (req, res) => {
-  const organizer = await User.findOne({ username: req.params.username, isOrganizer: true });
-  if (!organizer) return res.status(404).json({ message: 'Booking page not found' });
+// GET /api/public/advisors -> directory of active advisors for the homepage
+router.get('/advisors', async (req, res) => {
+  const advisors = await AdminUser.find({ role: 'advisor', isActive: true }).select(
+    'name designation department bio photoUrl username'
+  );
+  res.json({ advisors });
+});
 
-  const eventTypes = await EventType.find({ organizer: organizer._id, isActive: true }).select(
-    'title slug description duration color locationType'
+// GET /api/public/advisors/:username -> one advisor's profile + active session types
+router.get('/advisors/:username', async (req, res) => {
+  const advisor = await AdminUser.findOne({ username: req.params.username, role: 'advisor', isActive: true });
+  if (!advisor) return res.status(404).json({ message: 'Advisor not found' });
+
+  const eventTypes = await EventType.find({ advisor: advisor._id, isActive: true }).select(
+    'title slug description duration color locationType locationDetail'
   );
 
   res.json({
-    organizer: { name: organizer.name, picture: organizer.picture, username: organizer.username },
+    advisor: {
+      name: advisor.name,
+      designation: advisor.designation,
+      department: advisor.department,
+      bio: advisor.bio,
+      photoUrl: advisor.photoUrl,
+      username: advisor.username,
+    },
     eventTypes,
   });
 });
 
-// GET /api/public/:username/:slug/slots?date=YYYY-MM-DD
-router.get('/:username/:slug/slots', async (req, res) => {
+// GET /api/public/advisors/:username/:slug/slots?date=YYYY-MM-DD
+router.get('/advisors/:username/:slug/slots', async (req, res) => {
   try {
     const { date } = req.query;
     if (!date) return res.status(400).json({ message: 'date query param (YYYY-MM-DD) is required' });
 
-    const organizer = await User.findOne({ username: req.params.username, isOrganizer: true });
-    if (!organizer) return res.status(404).json({ message: 'Organizer not found' });
+    const advisor = await AdminUser.findOne({ username: req.params.username, role: 'advisor', isActive: true });
+    if (!advisor) return res.status(404).json({ message: 'Advisor not found' });
 
-    const eventType = await EventType.findOne({ organizer: organizer._id, slug: req.params.slug, isActive: true });
-    if (!eventType) return res.status(404).json({ message: 'Event type not found' });
+    const eventType = await EventType.findOne({ advisor: advisor._id, slug: req.params.slug, isActive: true });
+    if (!eventType) return res.status(404).json({ message: 'Session type not found' });
 
-    const availability = await Availability.findOne({ organizer: organizer._id });
+    const availability = await Availability.findOne({ advisor: advisor._id });
     if (!availability) return res.json({ slots: [] });
 
     const tz = availability.timezone;
     const dayStart = DateTime.fromISO(date, { zone: tz }).startOf('day');
     const dayEnd = dayStart.endOf('day');
 
-    // Pull real Google Calendar busy blocks for the day, plus any bookings
-    // already made through this app (belt-and-suspenders in case the calendar
-    // event creation lags).
-    let googleBusy = [];
-    try {
-      googleBusy = await getBusyBlocks(organizer._id, dayStart.toUTC().toISO(), dayEnd.toUTC().toISO());
-    } catch (e) {
-      console.error('Freebusy lookup failed, falling back to internal bookings only:', e.message);
-    }
-
     const existingBookings = await Booking.find({
-      organizer: organizer._id,
+      advisor: advisor._id,
       status: 'confirmed',
       startTime: { $lt: dayEnd.toJSDate() },
       endTime: { $gt: dayStart.toJSDate() },
     }).select('startTime endTime');
 
-    const bookingBusy = existingBookings.map((b) => ({
+    const busyBlocks = existingBookings.map((b) => ({
       start: b.startTime.toISOString(),
       end: b.endTime.toISOString(),
     }));
@@ -72,7 +76,7 @@ router.get('/:username/:slug/slots', async (req, res) => {
       bufferBeforeMin: eventType.bufferBeforeMin,
       bufferAfterMin: eventType.bufferAfterMin,
       minNoticeHours: eventType.minNoticeHours,
-      busyBlocks: [...googleBusy, ...bookingBusy],
+      busyBlocks,
       timezone: tz,
     });
 

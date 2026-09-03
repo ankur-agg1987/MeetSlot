@@ -1,6 +1,6 @@
 const express = require('express');
 const Availability = require('../models/Availability');
-const { requireAuth, requireOrganizer } = require('../middleware/auth');
+const { requireAuth, requireAdvisor } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -10,12 +10,12 @@ const DEFAULT_WEEKLY = [0, 1, 2, 3, 4, 5, 6].map((day) => ({
   ranges: day >= 1 && day <= 5 ? [{ start: '09:00', end: '17:00' }] : [],
 }));
 
-// Get (or lazily create) the organizer's availability doc
-router.get('/', requireAuth, requireOrganizer, async (req, res) => {
-  let availability = await Availability.findOne({ organizer: req.user._id });
+// Get (or lazily create) the advisor's availability doc
+router.get('/', requireAuth, requireAdvisor, async (req, res) => {
+  let availability = await Availability.findOne({ advisor: req.user._id });
   if (!availability) {
     availability = await Availability.create({
-      organizer: req.user._id,
+      advisor: req.user._id,
       timezone: req.user.timezone || 'Asia/Kolkata',
       weeklyHours: DEFAULT_WEEKLY,
       dateOverrides: [],
@@ -25,10 +25,10 @@ router.get('/', requireAuth, requireOrganizer, async (req, res) => {
 });
 
 // Replace weekly hours + timezone
-router.put('/', requireAuth, requireOrganizer, async (req, res) => {
+router.put('/', requireAuth, requireAdvisor, async (req, res) => {
   const { weeklyHours, timezone } = req.body;
   const availability = await Availability.findOneAndUpdate(
-    { organizer: req.user._id },
+    { advisor: req.user._id },
     { $set: { weeklyHours, timezone } },
     { new: true, upsert: true }
   );
@@ -36,12 +36,12 @@ router.put('/', requireAuth, requireOrganizer, async (req, res) => {
 });
 
 // Add or replace a date override
-router.post('/overrides', requireAuth, requireOrganizer, async (req, res) => {
+router.post('/overrides', requireAuth, requireAdvisor, async (req, res) => {
   const { date, available, ranges } = req.body;
   if (!date) return res.status(400).json({ message: 'date is required' });
 
   const availability = await Availability.findOneAndUpdate(
-    { organizer: req.user._id },
+    { advisor: req.user._id },
     { $pull: { dateOverrides: { date } } },
     { new: true, upsert: true }
   );
@@ -50,9 +50,9 @@ router.post('/overrides', requireAuth, requireOrganizer, async (req, res) => {
   res.json({ availability });
 });
 
-router.delete('/overrides/:date', requireAuth, requireOrganizer, async (req, res) => {
+router.delete('/overrides/:date', requireAuth, requireAdvisor, async (req, res) => {
   const availability = await Availability.findOneAndUpdate(
-    { organizer: req.user._id },
+    { advisor: req.user._id },
     { $pull: { dateOverrides: { date: req.params.date } } },
     { new: true }
   );

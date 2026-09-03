@@ -12,17 +12,17 @@ export default function Navbar() {
 
   return (
     <div className="navbar">
-      <Link to="/" className="brand">📅 MeetSlot</Link>
-      <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+      <Link to="/" className="brand">🎓 CDC MeetSlot</Link>
+      <div style={{ display: 'flex', gap: 18, alignItems: 'center' }}>
         {user ? (
           <>
-            {user.isOrganizer && <Link to="/dashboard">Dashboard</Link>}
-            <Link to="/my-bookings">My Bookings</Link>
+            {user.role === 'master_admin' && <Link to="/master-admin">Master Admin</Link>}
+            {user.role === 'advisor' && <Link to="/dashboard">My Dashboard</Link>}
             <span>{user.name}</span>
             <button className="btn secondary" onClick={handleLogout}>Log out</button>
           </>
         ) : (
-          <Link to="/login" className="btn">Log in</Link>
+          <Link to="/login" className="top-login-link">Advisor / Admin Login</Link>
         )}
       </div>
     </div>

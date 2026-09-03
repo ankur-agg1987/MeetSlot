@@ -2,77 +2,91 @@ const express = require('express');
 const { DateTime } = require('luxon');
 const Booking = require('../models/Booking');
 const EventType = require('../models/EventType');
-const User = require('../models/User');
-const { requireAuth } = require('../middleware/auth');
-const { getBusyBlocks, createCalendarEvent, deleteCalendarEvent } = require('../utils/googleCalendar');
+const AdminUser = require('../models/AdminUser');
+const { requireAuth, requireAdvisor } = require('../middleware/auth');
+const { sendAdvisorNotification, sendStudentConfirmation } = require('../utils/email');
 
 const router = express.Router();
 
-// Create a booking. Caller must be Gmail-authenticated (any logged-in user, client or organizer).
-router.post('/', requireAuth, async (req, res) => {
+// Create a booking. NO AUTH REQUIRED - any student can book by filling the form.
+router.post('/', async (req, res) => {
   try {
-    const { username, slug, startTime, notes } = req.body;
+    const {
+      username,
+      slug,
+      startTime,
+      studentName,
+      studentId,
+      studentEmail,
+      studentPhone,
+      program,
+      yearOrSemester,
+      purpose,
+      message,
+    } = req.body;
+
     if (!username || !slug || !startTime) {
       return res.status(400).json({ message: 'username, slug and startTime are required' });
     }
-
-    const organizer = await User.findOne({ username, isOrganizer: true });
-    if (!organizer) return res.status(404).json({ message: 'Organizer not found' });
-    if (String(organizer._id) === String(req.user._id)) {
-      return res.status(400).json({ message: "You can't book your own event type" });
+    if (!studentName || !studentEmail) {
+      return res.status(400).json({ message: 'Name and email are required' });
+    }
+    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailPattern.test(studentEmail)) {
+      return res.status(400).json({ message: 'Please enter a valid email address' });
     }
 
-    const eventType = await EventType.findOne({ organizer: organizer._id, slug, isActive: true });
-    if (!eventType) return res.status(404).json({ message: 'Event type not found' });
+    const advisor = await AdminUser.findOne({ username, role: 'advisor', isActive: true });
+    if (!advisor) return res.status(404).json({ message: 'Advisor not found' });
+
+    const eventType = await EventType.findOne({ advisor: advisor._id, slug, isActive: true });
+    if (!eventType) return res.status(404).json({ message: 'Session type not found' });
 
     const start = DateTime.fromISO(startTime);
     const end = start.plus({ minutes: eventType.duration });
 
-    // Re-validate against Google Calendar right before booking to avoid double-booking races
-    const busy = await getBusyBlocks(
-      organizer._id,
-      start.minus({ minutes: eventType.bufferBeforeMin }).toUTC().toISO(),
-      end.plus({ minutes: eventType.bufferAfterMin }).toUTC().toISO()
-    );
-    const conflict = busy.some((b) => start < DateTime.fromISO(b.end) && end > DateTime.fromISO(b.start));
-    if (conflict) {
-      return res.status(409).json({ message: 'This slot was just taken. Please pick another time.' });
-    }
-
-    const existing = await Booking.findOne({
-      organizer: organizer._id,
+    // Re-validate against existing bookings right before booking to avoid double-booking races
+    const conflict = await Booking.findOne({
+      advisor: advisor._id,
       status: 'confirmed',
       startTime: { $lt: end.toJSDate() },
       endTime: { $gt: start.toJSDate() },
     });
-    if (existing) {
+    if (conflict) {
       return res.status(409).json({ message: 'This slot was just taken. Please pick another time.' });
     }
 
-    const { googleEventId, meetLink } = await createCalendarEvent({
-      organizerId: organizer._id,
-      summary: `${eventType.title} - ${req.user.name} & ${organizer.name}`,
-      description: notes || eventType.description,
-      startISO: start.toUTC().toISO(),
-      endISO: end.toUTC().toISO(),
-      timezone: req.user.timezone || 'Asia/Kolkata',
-      clientEmail: req.user.email,
-      wantsMeetLink: eventType.locationType === 'google_meet',
-    });
-
     const booking = await Booking.create({
       eventType: eventType._id,
-      organizer: organizer._id,
-      client: req.user._id,
-      clientName: req.user.name,
-      clientEmail: req.user.email,
-      notes,
+      advisor: advisor._id,
+      studentName,
+      studentId,
+      studentEmail,
+      studentPhone,
+      program,
+      yearOrSemester,
+      purpose: purpose || 'Other',
+      message,
       startTime: start.toJSDate(),
       endTime: end.toJSDate(),
-      timezone: req.user.timezone || 'Asia/Kolkata',
-      googleEventId,
-      meetLink,
+      timezone: advisor.timezone || 'Asia/Kolkata',
     });
+
+    // Fire off notification emails - don't fail the booking if email sending has an issue,
+    // just record whether they went out so the master admin can see problems.
+    try {
+      await sendAdvisorNotification({ advisor, eventType, booking });
+      booking.advisorNotified = true;
+    } catch (e) {
+      console.error('Failed to email advisor:', e.message);
+    }
+    try {
+      await sendStudentConfirmation({ advisor, eventType, booking });
+      booking.studentConfirmed = true;
+    } catch (e) {
+      console.error('Failed to email student:', e.message);
+    }
+    await booking.save();
 
     res.status(201).json({ booking });
   } catch (err) {
@@ -81,37 +95,26 @@ router.post('/', requireAuth, async (req, res) => {
   }
 });
 
-// List bookings where the logged-in user is either the organizer or the client
-router.get('/mine', requireAuth, async (req, res) => {
-  const asOrganizer = await Booking.find({ organizer: req.user._id })
+// Advisor: list their own upcoming/past bookings
+router.get('/mine', requireAuth, requireAdvisor, async (req, res) => {
+  const bookings = await Booking.find({ advisor: req.user._id })
     .populate('eventType', 'title duration')
     .sort({ startTime: 1 });
-  const asClient = await Booking.find({ client: req.user._id })
-    .populate('eventType', 'title duration')
-    .populate('organizer', 'name email')
-    .sort({ startTime: 1 });
-
-  res.json({ asOrganizer, asClient });
+  res.json({ bookings });
 });
 
+// Advisor or master admin can cancel a booking
 router.post('/:id/cancel', requireAuth, async (req, res) => {
-  const booking = await Booking.findById(req.params.id);
+  const booking = await Booking.findById(req.params.id).populate('eventType').populate('advisor');
   if (!booking) return res.status(404).json({ message: 'Not found' });
 
-  const isParty = [String(booking.organizer), String(booking.client)].includes(String(req.user._id));
-  if (!isParty) return res.status(403).json({ message: 'Not your booking' });
+  const isOwningAdvisor = req.user.role === 'advisor' && String(booking.advisor._id) === String(req.user._id);
+  const isMaster = req.user.role === 'master_admin';
+  if (!isOwningAdvisor && !isMaster) return res.status(403).json({ message: 'Not permitted' });
 
   booking.status = 'cancelled';
   booking.cancelReason = req.body.reason || '';
   await booking.save();
-
-  if (booking.googleEventId) {
-    try {
-      await deleteCalendarEvent(booking.organizer, booking.googleEventId);
-    } catch (e) {
-      console.error('Failed to delete calendar event on cancel:', e.message);
-    }
-  }
 
   res.json({ booking });
 });

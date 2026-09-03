@@ -3,12 +3,13 @@ import Navbar from './components/Navbar';
 import ProtectedRoute from './components/ProtectedRoute';
 import Home from './pages/Home';
 import Login from './pages/Login';
+import ChangePassword from './pages/ChangePassword';
 import Dashboard from './pages/Dashboard';
+import MasterAdminDashboard from './pages/MasterAdminDashboard';
 import AvailabilitySettings from './pages/AvailabilitySettings';
 import PublicProfile from './pages/PublicProfile';
 import BookEventType from './pages/BookEventType';
 import BookingConfirmed from './pages/BookingConfirmed';
-import MyBookings from './pages/MyBookings';
 
 export default function App() {
   return (
@@ -18,9 +19,17 @@ export default function App() {
         <Route path="/" element={<Home />} />
         <Route path="/login" element={<Login />} />
         <Route
+          path="/change-password"
+          element={
+            <ProtectedRoute>
+              <ChangePassword />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/dashboard"
           element={
-            <ProtectedRoute organizerOnly>
+            <ProtectedRoute requiredRole="advisor">
               <Dashboard />
             </ProtectedRoute>
           }
@@ -28,22 +37,22 @@ export default function App() {
         <Route
           path="/availability"
           element={
-            <ProtectedRoute organizerOnly>
+            <ProtectedRoute requiredRole="advisor">
               <AvailabilitySettings />
             </ProtectedRoute>
           }
         />
         <Route
-          path="/my-bookings"
+          path="/master-admin"
           element={
-            <ProtectedRoute>
-              <MyBookings />
+            <ProtectedRoute requiredRole="master_admin">
+              <MasterAdminDashboard />
             </ProtectedRoute>
           }
         />
         <Route path="/booking-confirmed" element={<BookingConfirmed />} />
-        <Route path="/u/:username" element={<PublicProfile />} />
-        <Route path="/u/:username/:slug" element={<BookEventType />} />
+        <Route path="/advisor/:username" element={<PublicProfile />} />
+        <Route path="/advisor/:username/:slug" element={<BookEventType />} />
         <Route path="*" element={<div className="container">Page not found</div>} />
       </Routes>
     </>

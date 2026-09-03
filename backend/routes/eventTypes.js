@@ -1,6 +1,6 @@
 const express = require('express');
 const EventType = require('../models/EventType');
-const { requireAuth, requireOrganizer } = require('../middleware/auth');
+const { requireAuth, requireAdvisor } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -12,14 +12,14 @@ function slugify(str) {
     .replace(/(^-|-$)/g, '');
 }
 
-// List the logged-in organizer's event types
-router.get('/', requireAuth, requireOrganizer, async (req, res) => {
-  const types = await EventType.find({ organizer: req.user._id }).sort({ createdAt: -1 });
+// List the logged-in advisor's session types
+router.get('/', requireAuth, requireAdvisor, async (req, res) => {
+  const types = await EventType.find({ advisor: req.user._id }).sort({ createdAt: -1 });
   res.json({ eventTypes: types });
 });
 
-// Create a new event type
-router.post('/', requireAuth, requireOrganizer, async (req, res) => {
+// Create a new session type
+router.post('/', requireAuth, requireAdvisor, async (req, res) => {
   try {
     const { title, description, duration, color, bufferBeforeMin, bufferAfterMin, minNoticeHours, maxBookingWindowDays, locationType, locationDetail } = req.body;
     if (!title || !duration) return res.status(400).json({ message: 'title and duration are required' });
@@ -27,12 +27,12 @@ router.post('/', requireAuth, requireOrganizer, async (req, res) => {
     let slug = slugify(title);
     let candidate = slug;
     let n = 1;
-    while (await EventType.findOne({ organizer: req.user._id, slug: candidate })) {
+    while (await EventType.findOne({ advisor: req.user._id, slug: candidate })) {
       candidate = `${slug}-${++n}`;
     }
 
     const eventType = await EventType.create({
-      organizer: req.user._id,
+      advisor: req.user._id,
       title,
       slug: candidate,
       description,
@@ -51,8 +51,8 @@ router.post('/', requireAuth, requireOrganizer, async (req, res) => {
   }
 });
 
-router.put('/:id', requireAuth, requireOrganizer, async (req, res) => {
-  const eventType = await EventType.findOne({ _id: req.params.id, organizer: req.user._id });
+router.put('/:id', requireAuth, requireAdvisor, async (req, res) => {
+  const eventType = await EventType.findOne({ _id: req.params.id, advisor: req.user._id });
   if (!eventType) return res.status(404).json({ message: 'Not found' });
 
   const fields = ['title', 'description', 'duration', 'color', 'isActive', 'bufferBeforeMin', 'bufferAfterMin', 'minNoticeHours', 'maxBookingWindowDays', 'locationType', 'locationDetail'];
@@ -63,8 +63,8 @@ router.put('/:id', requireAuth, requireOrganizer, async (req, res) => {
   res.json({ eventType });
 });
 
-router.delete('/:id', requireAuth, requireOrganizer, async (req, res) => {
-  const result = await EventType.deleteOne({ _id: req.params.id, organizer: req.user._id });
+router.delete('/:id', requireAuth, requireAdvisor, async (req, res) => {
+  const result = await EventType.deleteOne({ _id: req.params.id, advisor: req.user._id });
   if (result.deletedCount === 0) return res.status(404).json({ message: 'Not found' });
   res.json({ message: 'Deleted' });
 });

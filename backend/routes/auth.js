@@ -1,12 +1,10 @@
 const express = require('express');
+const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { OAuth2Client } = require('google-auth-library');
-const { getOAuth2Client, ORGANIZER_SCOPES } = require('../config/googleClient');
-const User = require('../models/User');
+const AdminUser = require('../models/AdminUser');
 const { requireAuth } = require('../middleware/auth');
 
 const router = express.Router();
-const idClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 function signToken(userId) {
   return jwt.sign({ id: userId }, process.env.JWT_SECRET, {
@@ -23,122 +21,34 @@ function setAuthCookie(res, token) {
   });
 }
 
-function slugifyUsername(name, email) {
-  const base = (name || email.split('@')[0])
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/(^-|-$)/g, '');
-  return `${base}-${Math.random().toString(36).slice(2, 6)}`;
-}
-
-// ---------- ORGANIZER FLOW: full OAuth with Calendar scope ----------
-
-// Step 1: redirect the organizer to Google's consent screen
-router.get('/google', (req, res) => {
-  const oauth2Client = getOAuth2Client();
-  const url = oauth2Client.generateAuthUrl({
-    access_type: 'offline', // required to get a refresh_token
-    prompt: 'consent', // force refresh_token on every login
-    scope: ORGANIZER_SCOPES,
-  });
-  res.redirect(url);
-});
-
-// Step 2: Google redirects back here with a ?code=
-router.get('/google/callback', async (req, res) => {
+// Single login endpoint for both master admin and advisor accounts.
+router.post('/login', async (req, res) => {
   try {
-    const { code } = req.query;
-    if (!code) return res.redirect(`${process.env.CLIENT_URL}/login?error=missing_code`);
-
-    const oauth2Client = getOAuth2Client();
-    const { tokens } = await oauth2Client.getToken(code);
-    oauth2Client.setCredentials(tokens);
-
-    const ticket = await oauth2Client.verifyIdToken({
-      idToken: tokens.id_token,
-      audience: process.env.GOOGLE_CLIENT_ID,
-    });
-    const payload = ticket.getPayload();
-
-    let user = await User.findOne({ googleId: payload.sub });
-    if (!user) {
-      user = new User({
-        googleId: payload.sub,
-        email: payload.email,
-        name: payload.name,
-        picture: payload.picture,
-        username: slugifyUsername(payload.name, payload.email),
-      });
+    const { username, password } = req.body;
+    if (!username || !password) {
+      return res.status(400).json({ message: 'Username and password are required' });
     }
 
-    user.isOrganizer = true;
-    user.name = payload.name;
-    user.picture = payload.picture;
-    user.googleAccessToken = tokens.access_token;
-    if (tokens.refresh_token) user.googleRefreshToken = tokens.refresh_token; // only sent on first consent
-    if (tokens.expiry_date) user.googleTokenExpiry = new Date(tokens.expiry_date);
-    await user.save();
+    const user = await AdminUser.findOne({ username: username.toLowerCase().trim() }).select('+passwordHash');
+    if (!user) return res.status(401).json({ message: 'Invalid username or password' });
+    if (!user.isActive) return res.status(403).json({ message: 'This account has been deactivated. Contact the master admin.' });
 
-    if (!user.googleRefreshToken) {
-      // Edge case: user had already granted consent previously, so Google didn't resend
-      // a refresh_token. They must revoke access at myaccount.google.com/permissions and retry.
-      return res.redirect(`${process.env.CLIENT_URL}/login?error=reconnect_required`);
-    }
-
-    const token = signToken(user._id);
-    setAuthCookie(res, token);
-    res.redirect(`${process.env.CLIENT_URL}/dashboard`);
-  } catch (err) {
-    console.error('OAuth callback error:', err);
-    res.redirect(`${process.env.CLIENT_URL}/login?error=oauth_failed`);
-  }
-});
-
-// ---------- CLIENT (booker) FLOW: lightweight identity-only sign-in ----------
-// Frontend uses Google Identity Services to get an ID token, then posts it here.
-router.post('/google/client', async (req, res) => {
-  try {
-    const { idToken } = req.body;
-    if (!idToken) return res.status(400).json({ message: 'idToken is required' });
-
-    const ticket = await idClient.verifyIdToken({
-      idToken,
-      audience: process.env.GOOGLE_CLIENT_ID,
-    });
-    const payload = ticket.getPayload();
-    if (!payload.email_verified) {
-      return res.status(401).json({ message: 'Gmail account not verified' });
-    }
-
-    let user = await User.findOne({ googleId: payload.sub });
-    if (!user) {
-      user = await User.create({
-        googleId: payload.sub,
-        email: payload.email,
-        name: payload.name,
-        picture: payload.picture,
-      });
-    } else {
-      user.name = payload.name;
-      user.picture = payload.picture;
-      await user.save();
-    }
+    const match = await bcrypt.compare(password, user.passwordHash);
+    if (!match) return res.status(401).json({ message: 'Invalid username or password' });
 
     const token = signToken(user._id);
     setAuthCookie(res, token);
     res.json({
       user: {
         id: user._id,
-        name: user.name,
-        email: user.email,
-        picture: user.picture,
-        isOrganizer: user.isOrganizer,
         username: user.username,
+        name: user.name,
+        role: user.role,
+        mustChangePassword: user.mustChangePassword,
       },
     });
   } catch (err) {
-    console.error('Client login error:', err);
-    res.status(401).json({ message: 'Google sign-in verification failed' });
+    res.status(500).json({ message: 'Login failed' });
   }
 });
 
@@ -147,14 +57,28 @@ router.get('/me', requireAuth, (req, res) => {
   res.json({
     user: {
       id: u._id,
-      name: u.name,
-      email: u.email,
-      picture: u.picture,
-      isOrganizer: u.isOrganizer,
       username: u.username,
+      name: u.name,
+      role: u.role,
+      mustChangePassword: u.mustChangePassword,
       timezone: u.timezone,
     },
   });
+});
+
+router.post('/change-password', requireAuth, async (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+  if (!newPassword || newPassword.length < 8) {
+    return res.status(400).json({ message: 'New password must be at least 8 characters' });
+  }
+  const user = await AdminUser.findById(req.user._id).select('+passwordHash');
+  const match = await bcrypt.compare(currentPassword || '', user.passwordHash);
+  if (!match) return res.status(401).json({ message: 'Current password is incorrect' });
+
+  user.passwordHash = await bcrypt.hash(newPassword, 10);
+  user.mustChangePassword = false;
+  await user.save();
+  res.json({ message: 'Password updated' });
 });
 
 router.post('/logout', (req, res) => {

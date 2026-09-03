@@ -3,14 +3,14 @@ const { DateTime } = require('luxon');
 /**
  * Computes bookable start-time slots for a single calendar date.
  *
- * @param {string} dateStr - "YYYY-MM-DD" in the organizer's timezone
+ * @param {string} dateStr - "YYYY-MM-DD" in the advisor's timezone
  * @param {object} availability - Availability mongoose doc
  * @param {number} durationMin - event type duration
  * @param {number} bufferBeforeMin
  * @param {number} bufferAfterMin
  * @param {number} minNoticeHours
- * @param {Array<{start: string, end: string}>} busyBlocks - ISO strings from Google freebusy + existing bookings
- * @param {string} timezone - organizer's timezone (IANA)
+ * @param {Array<{start: string, end: string}>} busyBlocks - ISO strings of already-booked time ranges to avoid
+ * @param {string} timezone - advisor's timezone (IANA)
  * @returns {string[]} array of ISO start-time strings (UTC) for open slots
  */
 function computeSlotsForDate({

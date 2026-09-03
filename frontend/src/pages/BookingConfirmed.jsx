@@ -14,19 +14,14 @@ export default function BookingConfirmed() {
   }
 
   return (
-    <div className="container" style={{ maxWidth: 480 }}>
+    <div className="container narrow">
       <div className="card" style={{ textAlign: 'center' }}>
-        <h2>✅ You're booked!</h2>
+        <h2>✅ Your session is booked!</h2>
         <p>
           {DateTime.fromISO(booking.startTime).setZone(booking.timezone).toFormat('cccc, LLLL d, yyyy · h:mm a')}
         </p>
-        <p>A calendar invite has been sent to your Gmail address.</p>
-        {booking.meetLink && (
-          <p>
-            <a href={booking.meetLink} target="_blank" rel="noreferrer">Join Google Meet</a>
-          </p>
-        )}
-        <Link to="/my-bookings" className="btn">View my bookings</Link>
+        <p>A confirmation email has been sent to your inbox, and your advisor has been notified.</p>
+        <Link to="/" className="btn">Back to homepage</Link>
       </div>
     </div>
   );

@@ -1,15 +1,21 @@
 const mongoose = require('mongoose');
 
+// A booked career-advisory session. No student login exists, so all of the
+// student's details are captured directly on the booking form and stored here.
 const bookingSchema = new mongoose.Schema(
   {
     eventType: { type: mongoose.Schema.Types.ObjectId, ref: 'EventType', required: true },
-    organizer: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    advisor: { type: mongoose.Schema.Types.ObjectId, ref: 'AdminUser', required: true },
 
-    // The client (booker) - must be Gmail-authenticated
-    client: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    clientName: { type: String, required: true },
-    clientEmail: { type: String, required: true },
-    notes: { type: String, default: '' },
+    // Student details, captured at booking time (no student account exists)
+    studentName: { type: String, required: true },
+    studentId: { type: String, default: '' }, // roll number / registration number
+    studentEmail: { type: String, required: true },
+    studentPhone: { type: String, default: '' },
+    program: { type: String, default: '' }, // e.g. "B.Tech CSE", "MCA"
+    yearOrSemester: { type: String, default: '' },
+    purpose: { type: String, default: '' }, // e.g. "Resume Review", "Interview Prep"
+    message: { type: String, default: '' }, // free-text details of what the student wants to discuss
 
     startTime: { type: Date, required: true },
     endTime: { type: Date, required: true },
@@ -22,13 +28,13 @@ const bookingSchema = new mongoose.Schema(
     },
     cancelReason: { type: String, default: '' },
 
-    // Google Calendar event created on the organizer's calendar
-    googleEventId: { type: String },
-    meetLink: { type: String },
+    // Whether the notification email to the advisor's Gmail went out successfully
+    advisorNotified: { type: Boolean, default: false },
+    studentConfirmed: { type: Boolean, default: false },
   },
   { timestamps: true }
 );
 
-bookingSchema.index({ organizer: 1, startTime: 1 });
+bookingSchema.index({ advisor: 1, startTime: 1 });
 
 module.exports = mongoose.model('Booking', bookingSchema);
