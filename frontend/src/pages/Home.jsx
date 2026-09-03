@@ -34,7 +34,7 @@ export default function Home() {
           </div>
           <div>
             <div className="stat-num">Free</div>
-            <div className="stat-label">For all MRIIRS / MRU students</div>
+            <div className="stat-label">For all SNU students</div>
           </div>
         </div>
       </div>
