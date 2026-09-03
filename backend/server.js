@@ -10,6 +10,7 @@ const eventTypeRoutes = require('./routes/eventTypes');
 const availabilityRoutes = require('./routes/availability');
 const publicRoutes = require('./routes/public');
 const bookingRoutes = require('./routes/bookings');
+const setupRoutes = require('./routes/setup');
 
 const app = express();
 
@@ -32,6 +33,7 @@ app.use('/api/event-types', eventTypeRoutes);
 app.use('/api/availability', availabilityRoutes);
 app.use('/api/public', publicRoutes);
 app.use('/api/bookings', bookingRoutes);
+app.use('/api/setup', setupRoutes);
 
 app.use((req, res) => res.status(404).json({ message: 'Route not found' }));
 app.use((err, req, res, next) => {

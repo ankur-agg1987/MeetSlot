@@ -81,6 +81,11 @@ MongoDB Atlas → Render → Vercel → Gmail App Password), see
 
 ## Notes
 
+- **Creating the 11 accounts**: after deploying the backend, visit
+  `https://<your-backend>/api/setup/seed?secret=<SEED_SECRET>` once in a
+  browser (see the deployment guide) — this works even on Render's free
+  tier, which has no Shell access. `npm run seed` does the same thing if
+  you're running locally or have Shell access.
 - **Render free tier cold starts**: the backend "sleeps" after ~15 minutes of
   no traffic; the first request after that takes 30-50 seconds. Fine for a
   CDC-scale tool; not something to worry about for normal use.
