@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { DateTime } from 'luxon';
 import api from '../api/axios';
+import WeeklyStatsTable from '../components/WeeklyStatsTable';
 
 function AdvisorEditForm({ advisor, onSaved, onClose }) {
   const [form, setForm] = useState({
@@ -70,7 +71,7 @@ function AdvisorEditForm({ advisor, onSaved, onClose }) {
             <input value={form.photoUrl} onChange={(e) => setForm({ ...form, photoUrl: e.target.value })} placeholder="https://..." />
             <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <input type="checkbox" style={{ width: 'auto' }} checked={form.isActive} onChange={(e) => setForm({ ...form, isActive: e.target.checked })} />
-              Visible on homepage (active)
+              Visible on homepage &amp; allowed to log in (active)
             </label>
           </div>
         </div>
@@ -93,39 +94,66 @@ function AdvisorEditForm({ advisor, onSaved, onClose }) {
 
 export default function MasterAdminDashboard() {
   const [advisors, setAdvisors] = useState([]);
+  const [advisorsError, setAdvisorsError] = useState('');
   const [editingId, setEditingId] = useState(null);
   const [bookings, setBookings] = useState([]);
+  const [bookingsFilter, setBookingsFilter] = useState('');
+  const [overallStats, setOverallStats] = useState([]);
+  const [perAdvisorStats, setPerAdvisorStats] = useState([]);
   const [tab, setTab] = useState('advisors');
 
   async function loadAdvisors() {
-    const { data } = await api.get('/admin/advisors');
-    setAdvisors(data.advisors);
+    setAdvisorsError('');
+    try {
+      const { data } = await api.get('/admin/advisors');
+      setAdvisors(data.advisors);
+    } catch (err) {
+      setAdvisorsError(err.response?.data?.message || 'Failed to load advisor accounts');
+    }
   }
-  async function loadBookings() {
-    const { data } = await api.get('/admin/bookings');
+  async function loadBookings(advisorId) {
+    const { data } = await api.get('/admin/bookings', { params: advisorId ? { advisor: advisorId } : {} });
     setBookings(data.bookings);
+  }
+  async function loadStats() {
+    const { data } = await api.get('/admin/bookings/stats');
+    setOverallStats(data.overall);
+    setPerAdvisorStats(data.perAdvisor);
   }
 
   useEffect(() => {
     loadAdvisors();
     loadBookings();
+    loadStats();
   }, []);
+
+  useEffect(() => {
+    loadBookings(bookingsFilter || undefined);
+  }, [bookingsFilter]);
 
   return (
     <div className="container">
       <h2>Master Admin</h2>
-      <p style={{ color: '#666' }}>Manage the 10 advisor accounts and review all booking activity across the platform.</p>
+      <p style={{ color: '#666' }}>Manage the advisor accounts and review booking activity across the platform.</p>
 
-      <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
         <button className={`btn ${tab === 'advisors' ? '' : 'secondary'}`} onClick={() => setTab('advisors')}>Advisor Accounts</button>
         <button className={`btn ${tab === 'bookings' ? '' : 'secondary'}`} onClick={() => setTab('bookings')}>All Bookings ({bookings.length})</button>
+        <button className={`btn ${tab === 'analytics' ? '' : 'secondary'}`} onClick={() => setTab('analytics')}>Analytics</button>
       </div>
 
       {tab === 'advisors' && (
         <>
+          {advisorsError && (
+            <div className="card">
+              <p style={{ color: '#c62828' }}>{advisorsError}</p>
+              <button className="btn secondary" onClick={loadAdvisors}>Try again</button>
+            </div>
+          )}
+          {!advisorsError && advisors.length === 0 && <p>No advisor accounts found.</p>}
           {advisors.map((a) => (
             <div key={a._id}>
-              <div className="card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div className="card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
                 <div>
                   <strong>{a.name}</strong>{' '}
                   <span className={`badge ${a.isActive ? 'confirmed' : 'inactive'}`}>{a.isActive ? 'Active' : 'Hidden'}</span>
@@ -154,18 +182,65 @@ export default function MasterAdminDashboard() {
 
       {tab === 'bookings' && (
         <div className="card">
-          {bookings.length === 0 && <p>No bookings yet.</p>}
-          {bookings.map((b) => (
-            <div key={b._id} style={{ borderTop: '1px solid #eee', padding: '10px 0' }}>
-              <strong>{b.studentName}</strong> with <strong>{b.advisor?.name}</strong> — {b.eventType?.title}{' '}
-              <span className={`badge ${b.status}`}>{b.status}</span>
-              <p style={{ margin: '4px 0', fontSize: 13, color: '#666' }}>
-                {DateTime.fromISO(b.startTime).toFormat('cccc, LLLL d, yyyy · h:mm a')}
-              </p>
-              <p style={{ margin: '4px 0', fontSize: 13 }}>{b.studentEmail} {b.studentPhone && `· ${b.studentPhone}`}</p>
-            </div>
-          ))}
+          <label>Filter by advisor</label>
+          <select value={bookingsFilter} onChange={(e) => setBookingsFilter(e.target.value)}>
+            <option value="">All advisors</option>
+            {advisors.map((a) => (
+              <option key={a._id} value={a._id}>{a.name}</option>
+            ))}
+          </select>
+
+          <div style={{ marginTop: 14 }}>
+            {bookings.length === 0 && <p>No bookings found.</p>}
+            {bookings.map((b) => (
+              <div key={b._id} style={{ borderTop: '1px solid #eee', padding: '10px 0' }}>
+                <strong>{b.studentName}</strong> with <strong>{b.advisor?.name}</strong> — {b.eventType?.title}{' '}
+                <span className={`badge ${b.status}`}>{b.status}</span>
+                {b.remarksSentAt && <span className="badge confirmed" style={{ marginLeft: 4 }}>Follow-up sent</span>}
+                <p style={{ margin: '4px 0', fontSize: 13, color: '#666' }}>
+                  {DateTime.fromISO(b.startTime).toFormat('cccc, LLLL d, yyyy · h:mm a')}
+                </p>
+                <p style={{ margin: '4px 0', fontSize: 13 }}>{b.studentEmail}{b.studentPhone && ` · ${b.studentPhone}`}</p>
+              </div>
+            ))}
+          </div>
         </div>
+      )}
+
+      {tab === 'analytics' && (
+        <>
+          <div className="card">
+            <h3>Platform-wide weekly activity</h3>
+            <WeeklyStatsTable weeks={overallStats} />
+          </div>
+          <div className="card">
+            <h3>Per-advisor breakdown (all-time)</h3>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                <thead>
+                  <tr style={{ textAlign: 'left', borderBottom: '2px solid #e1e4e8' }}>
+                    <th style={{ padding: '6px 8px' }}>Advisor</th>
+                    <th style={{ padding: '6px 8px' }}>Total bookings</th>
+                    <th style={{ padding: '6px 8px' }}>Completed</th>
+                    <th style={{ padding: '6px 8px' }}>Pending action</th>
+                    <th style={{ padding: '6px 8px' }}>Upcoming</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {perAdvisorStats.map((s) => (
+                    <tr key={s.advisorId} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                      <td style={{ padding: '6px 8px', fontWeight: 600 }}>{s.name}</td>
+                      <td style={{ padding: '6px 8px' }}>{s.total}</td>
+                      <td style={{ padding: '6px 8px', color: '#1e7e34' }}>{s.completed}</td>
+                      <td style={{ padding: '6px 8px', color: '#b3541e' }}>{s.pending}</td>
+                      <td style={{ padding: '6px 8px' }}>{s.upcoming}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
       )}
     </div>
   );

@@ -1,28 +1,52 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { DateTime } from 'luxon';
 import api from '../api/axios';
 import { useAuth } from '../context/AuthContext';
+import BookingCard from '../components/BookingCard';
+import WeeklyStatsTable from '../components/WeeklyStatsTable';
 
 export default function Dashboard() {
   const { user } = useAuth();
   const [eventTypes, setEventTypes] = useState([]);
+  const [eventTypesError, setEventTypesError] = useState('');
   const [bookings, setBookings] = useState([]);
+  const [bookingsError, setBookingsError] = useState('');
+  const [stats, setStats] = useState([]);
   const [form, setForm] = useState({ title: '', duration: 30, description: '', locationType: 'in_person', locationDetail: '' });
   const [creating, setCreating] = useState(false);
+  const [tab, setTab] = useState('upcoming');
 
   async function loadEventTypes() {
-    const { data } = await api.get('/event-types');
-    setEventTypes(data.eventTypes);
+    setEventTypesError('');
+    try {
+      const { data } = await api.get('/event-types');
+      setEventTypes(data.eventTypes);
+    } catch (err) {
+      setEventTypesError(err.response?.data?.message || 'Failed to load session types');
+    }
   }
   async function loadBookings() {
-    const { data } = await api.get('/bookings/mine');
-    setBookings(data.bookings);
+    setBookingsError('');
+    try {
+      const { data } = await api.get('/bookings/mine');
+      setBookings(data.bookings);
+    } catch (err) {
+      setBookingsError(err.response?.data?.message || 'Failed to load bookings');
+    }
+  }
+  async function loadStats() {
+    try {
+      const { data } = await api.get('/bookings/mine/stats');
+      setStats(data.weeks);
+    } catch {
+      // non-critical, fail silently
+    }
   }
 
   useEffect(() => {
     loadEventTypes();
     loadBookings();
+    loadStats();
   }, []);
 
   async function createEventType(e) {
@@ -50,14 +74,12 @@ export default function Dashboard() {
     loadEventTypes();
   }
 
-  async function cancelBooking(id) {
-    if (!confirm('Cancel this session?')) return;
-    await api.post(`/bookings/${id}/cancel`, { reason: 'Cancelled by advisor' });
-    loadBookings();
-  }
+  const now = new Date();
+  const upcoming = bookings.filter((b) => b.status === 'confirmed' && new Date(b.startTime) > now);
+  const pending = bookings.filter((b) => b.status === 'confirmed' && new Date(b.startTime) <= now && !b.remarksSentAt);
+  const completed = bookings.filter((b) => b.status === 'confirmed' && new Date(b.startTime) <= now && b.remarksSentAt);
 
   const bookingPageUrl = user?.username ? `${window.location.origin}/advisor/${user.username}` : null;
-  const upcoming = bookings.filter((b) => b.status === 'confirmed' && new Date(b.startTime) > new Date());
 
   return (
     <div className="container">
@@ -103,12 +125,16 @@ export default function Dashboard() {
             <p>Set your weekly working hours and block off specific dates.</p>
             <Link to="/availability" className="btn secondary">Manage availability</Link>
           </div>
-        </div>
 
-        <div>
           <div className="card">
             <h3>Your session types</h3>
-            {eventTypes.length === 0 && <p>No session types yet — create one on the left.</p>}
+            {eventTypesError && (
+              <div>
+                <p style={{ color: '#c62828' }}>{eventTypesError}</p>
+                <button className="btn secondary" onClick={loadEventTypes}>Try again</button>
+              </div>
+            )}
+            {!eventTypesError && eventTypes.length === 0 && <p>No session types yet — create one above.</p>}
             {eventTypes.map((et) => (
               <div key={et._id} style={{ borderTop: '1px solid #eee', padding: '10px 0' }}>
                 <strong>{et.title}</strong> — {et.duration} min{' '}
@@ -123,21 +149,47 @@ export default function Dashboard() {
               </div>
             ))}
           </div>
+        </div>
+
+        <div>
+          <div className="card">
+            <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
+              <button className={`btn ${tab === 'upcoming' ? '' : 'secondary'}`} onClick={() => setTab('upcoming')}>Upcoming ({upcoming.length})</button>
+              <button className={`btn ${tab === 'pending' ? '' : 'secondary'}`} onClick={() => setTab('pending')}>Pending ({pending.length})</button>
+              <button className={`btn ${tab === 'completed' ? '' : 'secondary'}`} onClick={() => setTab('completed')}>Completed ({completed.length})</button>
+            </div>
+
+            {bookingsError && (
+              <div>
+                <p style={{ color: '#c62828' }}>{bookingsError}</p>
+                <button className="btn secondary" onClick={loadBookings}>Try again</button>
+              </div>
+            )}
+
+            {!bookingsError && tab === 'upcoming' && (
+              <>
+                {upcoming.length === 0 && <p>No upcoming sessions.</p>}
+                {upcoming.map((b) => <BookingCard key={b._id} booking={b} onChanged={loadBookings} showRemarksForm={false} />)}
+              </>
+            )}
+            {!bookingsError && tab === 'pending' && (
+              <>
+                <p style={{ fontSize: 13, color: '#666' }}>Sessions that have already happened and are waiting on your follow-up notes.</p>
+                {pending.length === 0 && <p>Nothing pending — you're all caught up.</p>}
+                {pending.map((b) => <BookingCard key={b._id} booking={b} onChanged={() => { loadBookings(); loadStats(); }} showRemarksForm />)}
+              </>
+            )}
+            {!bookingsError && tab === 'completed' && (
+              <>
+                {completed.length === 0 && <p>No completed sessions yet.</p>}
+                {completed.map((b) => <BookingCard key={b._id} booking={b} onChanged={loadBookings} showRemarksForm />)}
+              </>
+            )}
+          </div>
 
           <div className="card">
-            <h3>Upcoming sessions ({upcoming.length})</h3>
-            {upcoming.length === 0 && <p>No upcoming sessions booked yet.</p>}
-            {upcoming.map((b) => (
-              <div key={b._id} style={{ borderTop: '1px solid #eee', padding: '10px 0' }}>
-                <strong>{b.studentName}</strong> — {b.eventType?.title}
-                <p style={{ margin: '4px 0', fontSize: 13, color: '#666' }}>
-                  {DateTime.fromISO(b.startTime).setZone(b.timezone).toFormat('cccc, LLLL d · h:mm a')}
-                </p>
-                <p style={{ margin: '4px 0', fontSize: 13 }}>{b.studentEmail} {b.studentPhone && `· ${b.studentPhone}`}</p>
-                {b.purpose && <p style={{ margin: '4px 0', fontSize: 13 }}>Purpose: {b.purpose}</p>}
-                <button className="btn danger" onClick={() => cancelBooking(b._id)} style={{ marginTop: 4 }}>Cancel</button>
-              </div>
-            ))}
+            <h3>Your weekly activity</h3>
+            <WeeklyStatsTable weeks={stats} />
           </div>
         </div>
       </div>

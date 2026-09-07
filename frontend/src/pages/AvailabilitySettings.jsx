@@ -5,13 +5,33 @@ const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Frid
 
 export default function AvailabilitySettings() {
   const [availability, setAvailability] = useState(null);
+  const [loadError, setLoadError] = useState('');
   const [saving, setSaving] = useState(false);
   const [overrideDate, setOverrideDate] = useState('');
   const [overrideAvailable, setOverrideAvailable] = useState(false);
 
+  function load() {
+    setLoadError('');
+    api
+      .get('/availability')
+      .then(({ data }) => setAvailability(data.availability))
+      .catch((err) => setLoadError(err.response?.data?.message || 'Failed to load availability. Please try refreshing the page.'));
+  }
+
   useEffect(() => {
-    api.get('/availability').then(({ data }) => setAvailability(data.availability));
+    load();
   }, []);
+
+  if (loadError) {
+    return (
+      <div className="container">
+        <div className="card">
+          <p style={{ color: '#c62828' }}>{loadError}</p>
+          <button className="btn secondary" onClick={load}>Try again</button>
+        </div>
+      </div>
+    );
+  }
 
   if (!availability) return <div className="container">Loading...</div>;
 
@@ -33,6 +53,24 @@ export default function AvailabilitySettings() {
     }));
   }
 
+  function addRange(day) {
+    setAvailability((av) => ({
+      ...av,
+      weeklyHours: av.weeklyHours.map((w) =>
+        w.day === day ? { ...w, ranges: [...w.ranges, { start: '09:00', end: '17:00' }] } : w
+      ),
+    }));
+  }
+
+  function removeRange(day, idx) {
+    setAvailability((av) => ({
+      ...av,
+      weeklyHours: av.weeklyHours.map((w) =>
+        w.day === day ? { ...w, ranges: w.ranges.filter((_, i) => i !== idx) } : w
+      ),
+    }));
+  }
+
   async function save() {
     setSaving(true);
     try {
@@ -42,6 +80,8 @@ export default function AvailabilitySettings() {
       });
       setAvailability(data.availability);
       alert('Saved!');
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to save');
     } finally {
       setSaving(false);
     }
@@ -78,27 +118,40 @@ export default function AvailabilitySettings() {
 
       <div className="card">
         <h3>Weekly hours</h3>
+        <p style={{ fontSize: 13, color: '#666' }}>
+          Turn on the days you're available, and add one or more time ranges per day (e.g. a
+          morning block and a separate afternoon block).
+        </p>
         {availability.weeklyHours
           .slice()
           .sort((a, b) => a.day - b.day)
           .map((w) => (
-            <div key={w.day} className="day-row">
-              <div className="day-label">{DAY_NAMES[w.day]}</div>
-              <input type="checkbox" checked={w.enabled} onChange={(e) => updateDay(w.day, { enabled: e.target.checked })} />
-              {w.enabled ? (
-                (w.ranges.length ? w.ranges : [{ start: '09:00', end: '17:00' }]).map((r, idx) => (
-                  <span key={idx} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                    <input type="time" value={r.start} style={{ width: 110 }} onChange={(e) => updateRange(w.day, idx, 'start', e.target.value)} />
-                    to
-                    <input type="time" value={r.end} style={{ width: 110 }} onChange={(e) => updateRange(w.day, idx, 'end', e.target.value)} />
-                  </span>
-                ))
-              ) : (
-                <span style={{ color: '#888' }}>Unavailable</span>
+            <div key={w.day} style={{ borderBottom: '1px solid #eee', padding: '10px 0' }}>
+              <div className="day-row">
+                <div className="day-label">{DAY_NAMES[w.day]}</div>
+                <input type="checkbox" checked={w.enabled} onChange={(e) => updateDay(w.day, { enabled: e.target.checked })} />
+                {!w.enabled && <span style={{ color: '#888' }}>Unavailable</span>}
+              </div>
+              {w.enabled && (
+                <div style={{ marginLeft: 102 }}>
+                  {(w.ranges.length ? w.ranges : [{ start: '09:00', end: '17:00' }]).map((r, idx) => (
+                    <div key={idx} style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}>
+                      <input type="time" value={r.start} style={{ width: 120 }} onChange={(e) => updateRange(w.day, idx, 'start', e.target.value)} />
+                      <span>to</span>
+                      <input type="time" value={r.end} style={{ width: 120 }} onChange={(e) => updateRange(w.day, idx, 'end', e.target.value)} />
+                      {w.ranges.length > 1 && (
+                        <button type="button" className="btn danger" style={{ padding: '4px 10px' }} onClick={() => removeRange(w.day, idx)}>Remove</button>
+                      )}
+                    </div>
+                  ))}
+                  <button type="button" className="btn secondary" style={{ padding: '4px 10px', fontSize: 13 }} onClick={() => addRange(w.day)}>
+                    + Add another time slot
+                  </button>
+                </div>
               )}
             </div>
           ))}
-        <button className="btn" onClick={save} disabled={saving} style={{ marginTop: 12 }}>Save weekly hours</button>
+        <button className="btn" onClick={save} disabled={saving} style={{ marginTop: 16 }}>{saving ? 'Saving...' : 'Save weekly hours'}</button>
       </div>
 
       <div className="card">

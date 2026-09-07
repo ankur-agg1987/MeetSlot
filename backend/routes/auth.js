@@ -39,6 +39,7 @@ router.post('/login', async (req, res) => {
     const token = signToken(user._id);
     setAuthCookie(res, token);
     res.json({
+      token,
       user: {
         id: user._id,
         username: user.username,

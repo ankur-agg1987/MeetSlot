@@ -15,14 +15,22 @@ async function seedAccounts() {
 
   const existingMaster = await AdminUser.findOne({ username: masterUsername });
   if (!existingMaster) {
-    await AdminUser.create({
-      username: masterUsername,
-      passwordHash: await bcrypt.hash(masterPassword, 10),
-      role: 'master_admin',
-      name: 'Master Administrator',
-      mustChangePassword: true,
-    });
-    created.push({ role: 'master_admin', username: masterUsername, password: masterPassword });
+    try {
+      await AdminUser.create({
+        username: masterUsername,
+        passwordHash: await bcrypt.hash(masterPassword, 10),
+        role: 'master_admin',
+        name: 'Master Administrator',
+        mustChangePassword: true,
+      });
+      created.push({ role: 'master_admin', username: masterUsername, password: masterPassword });
+    } catch (err) {
+      if (err.code === 11000) {
+        skipped.push(masterUsername);
+      } else {
+        throw err;
+      }
+    }
   } else {
     skipped.push(masterUsername);
   }
@@ -34,17 +42,28 @@ async function seedAccounts() {
       skipped.push(username);
       continue;
     }
-    await AdminUser.create({
-      username,
-      passwordHash: await bcrypt.hash(advisorPassword, 10),
-      role: 'advisor',
-      name: `Advisor ${i} (name not yet set)`,
-      designation: 'Career Advisor',
-      department: 'Career Development Center',
-      isActive: false, // hidden from the homepage until master admin fills in real details
-      mustChangePassword: true,
-    });
-    created.push({ role: 'advisor', username, password: advisorPassword });
+    try {
+      await AdminUser.create({
+        username,
+        passwordHash: await bcrypt.hash(advisorPassword, 10),
+        role: 'advisor',
+        name: `Advisor ${i} (name not yet set)`,
+        designation: 'Career Advisor',
+        department: 'Career Development Center',
+        isActive: false, // hidden from the homepage until master admin fills in real details
+        mustChangePassword: true,
+      });
+      created.push({ role: 'advisor', username, password: advisorPassword });
+    } catch (err) {
+      // Duplicate key = another simultaneous request already created this
+      // account a moment ago (e.g. a double page load). Treat as skipped
+      // rather than failing the whole request.
+      if (err.code === 11000) {
+        skipped.push(username);
+      } else {
+        throw err;
+      }
+    }
   }
 
   return { created, skipped };

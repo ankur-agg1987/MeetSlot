@@ -4,7 +4,8 @@ const Booking = require('../models/Booking');
 const EventType = require('../models/EventType');
 const AdminUser = require('../models/AdminUser');
 const { requireAuth, requireAdvisor } = require('../middleware/auth');
-const { sendAdvisorNotification, sendStudentConfirmation } = require('../utils/email');
+const { sendAdvisorNotification, sendStudentConfirmation, sendRemarksEmail } = require('../utils/email');
+const { computeWeeklyStats } = require('../utils/stats');
 
 const router = express.Router();
 
@@ -101,6 +102,39 @@ router.get('/mine', requireAuth, requireAdvisor, async (req, res) => {
     .populate('eventType', 'title duration')
     .sort({ startTime: 1 });
   res.json({ bookings });
+});
+
+// Advisor: their own week-by-week self-analytics
+router.get('/mine/stats', requireAuth, requireAdvisor, async (req, res) => {
+  const weeksBack = Math.min(Number(req.query.weeks) || 8, 26);
+  const bookings = await Booking.find({ advisor: req.user._id }).select('startTime status remarksSentAt');
+  const weeks = computeWeeklyStats(bookings, weeksBack);
+  res.json({ weeks });
+});
+
+// Advisor: record post-session remarks/action plan and email them to the student
+router.post('/:id/remarks', requireAuth, requireAdvisor, async (req, res) => {
+  const { remarks, actionPlan } = req.body;
+  if (!remarks && !actionPlan) {
+    return res.status(400).json({ message: 'Please add remarks or an action plan before sending' });
+  }
+
+  const booking = await Booking.findOne({ _id: req.params.id, advisor: req.user._id }).populate('eventType');
+  if (!booking) return res.status(404).json({ message: 'Booking not found' });
+
+  booking.remarks = remarks || '';
+  booking.actionPlan = actionPlan || '';
+
+  try {
+    await sendRemarksEmail({ advisor: req.user, eventType: booking.eventType, booking });
+    booking.remarksSentAt = new Date();
+    await booking.save();
+    res.json({ booking, message: 'Sent to the student.' });
+  } catch (err) {
+    await booking.save(); // keep the notes even if the email failed
+    console.error('Failed to send remarks email:', err.message);
+    res.status(502).json({ message: 'Notes saved, but the email failed to send. Please try again.' });
+  }
 });
 
 // Advisor or master admin can cancel a booking

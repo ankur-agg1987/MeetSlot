@@ -3,6 +3,7 @@ const bcrypt = require('bcryptjs');
 const AdminUser = require('../models/AdminUser');
 const Booking = require('../models/Booking');
 const { requireAuth, requireMasterAdmin } = require('../middleware/auth');
+const { computeWeeklyStats } = require('../utils/stats');
 
 const router = express.Router();
 router.use(requireAuth, requireMasterAdmin);
@@ -49,14 +50,37 @@ router.put('/advisors/:id/password', async (req, res) => {
   res.json({ message: 'Password reset. The advisor will be asked to change it on next login.' });
 });
 
-// View every booking across all advisors
+// View every booking across all advisors, optionally filtered to one advisor
 router.get('/bookings', async (req, res) => {
-  const bookings = await Booking.find({})
+  const filter = {};
+  if (req.query.advisor) filter.advisor = req.query.advisor;
+
+  const bookings = await Booking.find(filter)
     .populate('advisor', 'name username')
     .populate('eventType', 'title duration')
     .sort({ startTime: -1 })
     .limit(500);
   res.json({ bookings });
+});
+
+// Platform-wide analytics: overall week-by-week stats, plus a per-advisor breakdown
+router.get('/bookings/stats', async (req, res) => {
+  const weeksBack = Math.min(Number(req.query.weeks) || 8, 26);
+
+  const allBookings = await Booking.find({}).select('advisor startTime status remarksSentAt');
+  const overall = computeWeeklyStats(allBookings, weeksBack);
+
+  const advisors = await AdminUser.find({ role: 'advisor' }).select('name username');
+  const perAdvisor = advisors.map((adv) => {
+    const advBookings = allBookings.filter((b) => String(b.advisor) === String(adv._id));
+    const total = advBookings.filter((b) => b.status !== 'cancelled').length;
+    const completed = advBookings.filter((b) => b.status !== 'cancelled' && b.remarksSentAt).length;
+    const pending = advBookings.filter((b) => b.status !== 'cancelled' && !b.remarksSentAt && new Date(b.startTime) < new Date()).length;
+    const upcoming = advBookings.filter((b) => b.status !== 'cancelled' && new Date(b.startTime) >= new Date()).length;
+    return { advisorId: adv._id, name: adv.name, username: adv.username, total, completed, pending, upcoming };
+  });
+
+  res.json({ overall, perAdvisor });
 });
 
 module.exports = router;

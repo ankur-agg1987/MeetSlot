@@ -31,6 +31,12 @@ router.get('/seed', async (req, res) => {
       alreadyExisted: skipped,
     });
   } catch (err) {
+    if (err.code === 11000) {
+      // Someone already exists from a near-simultaneous request - not a real failure.
+      return res.json({
+        message: 'Accounts already exist (this can happen if the page was loaded twice). Try visiting this link again to confirm - it should now say nothing new to create.',
+      });
+    }
     res.status(500).json({ message: err.message });
   }
 });

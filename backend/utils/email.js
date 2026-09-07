@@ -75,4 +75,29 @@ async function sendStudentConfirmation({ advisor, eventType, booking }) {
   return true;
 }
 
-module.exports = { sendAdvisorNotification, sendStudentConfirmation };
+// Sends the advisor's post-session remarks and action plan to the student.
+async function sendRemarksEmail({ advisor, eventType, booking }) {
+  const transporter = getTransporter();
+  const when = formatWhen(booking);
+
+  await transporter.sendMail({
+    from: `"CDC MeetSlot" <${process.env.SMTP_USER}>`,
+    to: booking.studentEmail,
+    subject: `Follow-up: your session with ${advisor.name} on ${when}`,
+    html: `
+      <h2>Session Follow-Up</h2>
+      <p><strong>Advisor:</strong> ${advisor.name}${advisor.designation ? ` (${advisor.designation})` : ''}</p>
+      <p><strong>Session:</strong> ${eventType.title} - ${when}</p>
+      <hr/>
+      <h3>Discussion Notes</h3>
+      <p>${(booking.remarks || 'No additional notes.').replace(/\n/g, '<br/>')}</p>
+      <h3>Action Plan</h3>
+      <p>${(booking.actionPlan || 'No action items noted.').replace(/\n/g, '<br/>')}</p>
+      <hr/>
+      <p>If you have questions about this follow-up, please contact the Career Development Center.</p>
+    `,
+  });
+  return true;
+}
+
+module.exports = { sendAdvisorNotification, sendStudentConfirmation, sendRemarksEmail };

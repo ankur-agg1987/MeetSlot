@@ -31,6 +31,12 @@ const bookingSchema = new mongoose.Schema(
     // Whether the notification email to the advisor's Gmail went out successfully
     advisorNotified: { type: Boolean, default: false },
     studentConfirmed: { type: Boolean, default: false },
+
+    // Post-session follow-up: the advisor's notes and any action plan agreed
+    // with the student, sent to the student by email once the advisor clicks "Send".
+    remarks: { type: String, default: '' },
+    actionPlan: { type: String, default: '' },
+    remarksSentAt: { type: Date, default: null },
   },
   { timestamps: true }
 );
